@@ -13,10 +13,13 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
+	"fmt"
 	"go/build"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/template"
@@ -108,6 +111,22 @@ func printpkg(importpath string, t *template.Template, depth int) {
 	}
 }
 
+// rel returns the relative path between srcDir and wd, or an error if wd is not
+// a subdirectory of srcDir
+func getGoSubpath(srcDir, wd string) (string, error) {
+	if wd == "" {
+		return "", errors.New("working directory is not in GOPATH")
+	}
+	relpath, err := filepath.Rel(srcDir, wd)
+	if err != nil {
+		return "", err
+	}
+	if relpath == "" || relpath[0] == '.' {
+		return "", fmt.Errorf("working directory %s is not in GOPATH", wd)
+	}
+	return relpath, nil
+}
+
 func main() {
 	flag.BoolVar(&stdlib, "s", false, "include stdlib")
 	flag.BoolVar(&testimports, "t", false, "print test imports")
@@ -117,10 +136,22 @@ func main() {
 	flag.Parse()
 	*tmpl += "\n"
 
-	args := flag.Args()
-	if len(args) < 1 {
-		log.Printf("Usage: %s <importpath>\n", os.Args[0])
-		flag.Usage()
+	var args []string
+	if flag.NArg() < 1 {
+		wd, err := os.Getwd()
+		if err != nil {
+			log.Printf("Usage: %s <importpath>\n", os.Args[0])
+			flag.Usage()
+		}
+		srcPath := filepath.Join(build.Default.GOPATH, "src")
+		rel, err := getGoSubpath(srcPath, wd)
+		if err != nil {
+			log.Printf("%v\nUsage: %s <importpath>\n", err, os.Args[0])
+			flag.Usage()
+		}
+		args = []string{rel}
+	} else {
+		args = flag.Args()
 	}
 
 	t, err := template.New("").Parse(*tmpl)
